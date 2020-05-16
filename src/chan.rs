@@ -21,41 +21,38 @@ use crate::event::{Event, EventListener};
 
 /// Creates a bounded multi-producer multi-consumer channel.
 ///
-/// This channel has a buffer that can hold at most `cap` messages at a time.
+/// This channel has a buffer that holds at most `cap` messages at a time. If `cap` is zero, no
+/// messages can be stored in the channel, which means send operations must pair with receive
+/// operations in order to pass messages over.
 ///
-/// Senders and receivers can be cloned. When all senders associated with a channel get dropped, it
-/// becomes closed. Receive operations on a closed and empty channel return `None` instead of
-/// trying to await a message.
-///
-/// # Panics
-///
-/// If `cap` is zero, this function will panic.
+/// Senders and receivers can be cloned. When all senders associated with a channel are dropped,
+/// remaining messages can still be received, but after that receive operations will return
+/// [`None`]. On the other hand, when all receivers are dropped, further send operation block
+/// forever.
 ///
 /// # Examples
 ///
 /// ```
-/// # async_std::task::block_on(async {
-/// #
+/// use smol::{Task, Timer};
 /// use std::time::Duration;
 ///
-/// use async_std::sync::channel;
-/// use async_std::task;
+/// # smol::run(async {
+/// // Create a channel that can hold 1 message at a time.
+/// let (s, r) = piper::chan(1);
 ///
-/// let (s, r) = channel(1);
-///
-/// // This call returns immediately because there is enough space in the channel.
+/// // Sending completes immediately because there is enough space in the channel.
 /// s.send(1).await;
 ///
-/// task::spawn(async move {
-///     // This call will have to wait because the channel is full.
+/// let t = Task::spawn(async move {
+///     // This send operation is blocked because the channel is full.
 ///     // It will be able to complete only after the first message is received.
 ///     s.send(2).await;
 /// });
 ///
-/// task::sleep(Duration::from_secs(1)).await;
+/// // Sleep for a second and then receive both messages.
+/// Timer::after(Duration::from_secs(1)).await;
 /// assert_eq!(r.recv().await, Some(1));
 /// assert_eq!(r.recv().await, Some(2));
-/// #
 /// # })
 /// ```
 pub fn chan<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
@@ -76,27 +73,23 @@ pub fn chan<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
 ///
 /// This struct is created by the [`chan`] function. See its documentation for more.
 ///
-/// [`chan`]: fn.chan.html
+/// Senders can be cloned and implement [`Sink`].
 ///
 /// # Examples
 ///
 /// ```
-/// # async_std::task::block_on(async {
-/// #
-/// use async_std::sync::channel;
-/// use async_std::task;
+/// use smol::Task;
 ///
-/// let (s1, r) = channel(100);
+/// # smol::run(async {
+/// let (s1, r) = piper::chan(100);
 /// let s2 = s1.clone();
 ///
-/// task::spawn(async move { s1.send(1).await });
-/// task::spawn(async move { s2.send(2).await });
+/// let t1 = Task::spawn(async move { s1.send(1).await });
+/// let t2 = Task::spawn(async move { s2.send(2).await });
 ///
 /// let msg1 = r.recv().await.unwrap();
 /// let msg2 = r.recv().await.unwrap();
-///
 /// assert_eq!(msg1 + msg2, 3);
-/// #
 /// # })
 /// ```
 pub struct Sender<T> {
@@ -109,28 +102,30 @@ pub struct Sender<T> {
     /// the channel when the sink is flushed.
     buffer: VecDeque<T>,
 
-    /// Listens for a receive or handoff event that will unblock this sink.
+    /// Listens for a receive or handoff event that unblocks this sink.
     listener: Option<EventListener>,
 }
 
 impl<T> Unpin for Sender<T> {}
 
+unsafe impl<T: Send> Send for Sender<T> {}
+unsafe impl<T: Send> Sync for Sender<T> {}
+
 impl<T> Sender<T> {
     /// Sends a message into the channel.
     ///
-    /// If the channel is full, this method will wait until there is space in the channel.
+    /// If the channel is full, this method waits until there is space for a message in the
+    /// channel. If there are no receivers on this channel, sending waits forever.
     ///
     /// # Examples
     ///
     /// ```
-    /// # async_std::task::block_on(async {
-    /// #
-    /// use async_std::sync::channel;
-    /// use async_std::task;
+    /// use smol::Task;
     ///
-    /// let (s, r) = channel(1);
+    /// # smol::run(async {
+    /// let (s, r) = piper::chan(1);
     ///
-    /// task::spawn(async move {
+    /// let t = Task::spawn(async move {
     ///     s.send(1).await;
     ///     s.send(2).await;
     /// });
@@ -138,7 +133,6 @@ impl<T> Sender<T> {
     /// assert_eq!(r.recv().await, Some(1));
     /// assert_eq!(r.recv().await, Some(2));
     /// assert_eq!(r.recv().await, None);
-    /// #
     /// # })
     /// ```
     pub async fn send(&self, msg: T) {
@@ -150,12 +144,12 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use async_std::sync::channel;
-    ///
-    /// let (s, _) = channel::<i32>(5);
+    /// let (s, _) = piper::chan::<i32>(5);
     /// assert_eq!(s.capacity(), 5);
     /// ```
     pub fn capacity(&self) -> usize {
+        // If this channel does handoff, the capacity is 0, even though the internal buffer's
+        // capacity is 1.
         if self.channel.handoff.is_some() {
             0
         } else {
@@ -165,35 +159,37 @@ impl<T> Sender<T> {
 
     /// Returns `true` if the channel is empty.
     ///
+    /// If the channel's capacity is zero, it is always empty.
+    ///
     /// # Examples
     ///
     /// ```
-    /// # async_std::task::block_on(async {
-    /// #
-    /// use async_std::sync::channel;
-    ///
-    /// let (s, r) = channel(1);
+    /// # smol::run(async {
+    /// let (s, r) = piper::chan(1);
     ///
     /// assert!(s.is_empty());
     /// s.send(0).await;
     /// assert!(!s.is_empty());
-    /// #
     /// # })
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.channel.is_empty()
+        if self.capacity() == 0 {
+            true
+        } else {
+            self.channel.is_empty()
+        }
     }
 
     /// Returns `true` if the channel is full.
     ///
+    /// If the channel's capacity is zero, it is always full.
+    ///
     /// # Examples
     ///
     /// ```
-    /// # async_std::task::block_on(async {
-    /// #
-    /// use async_std::sync::channel;
     ///
-    /// let (s, r) = channel(1);
+    /// # smol::run(async {
+    /// let (s, r) = piper::chan(1);
     ///
     /// assert!(!s.is_full());
     /// s.send(0).await;
@@ -202,7 +198,11 @@ impl<T> Sender<T> {
     /// # })
     /// ```
     pub fn is_full(&self) -> bool {
-        self.channel.is_full()
+        if self.capacity() == 0 {
+            true
+        } else {
+            self.channel.is_full()
+        }
     }
 
     /// Returns the number of messages in the channel.
@@ -210,17 +210,13 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # async_std::task::block_on(async {
-    /// #
-    /// use async_std::sync::channel;
-    ///
-    /// let (s, r) = channel(2);
+    /// # smol::run(async {
+    /// let (s, r) = piper::chan(2);
     /// assert_eq!(s.len(), 0);
     ///
     /// s.send(1).await;
     /// s.send(2).await;
     /// assert_eq!(s.len(), 2);
-    /// #
     /// # })
     /// ```
     pub fn len(&self) -> usize {
@@ -297,8 +293,8 @@ impl<T> Sink<T> for Sender<T> {
                         // If this is a zero-capacity channel, we need to wait for the receiver to
                         // confirm the message was received.
                         if let Some(h) = &self.channel.handoff {
-                            // The buffer capacity is 1, so pointer to the channel buffer matches
-                            // the pointer to the first (and only) slot in it.
+                            // The internal buffer's capacity is 1, which means the pointer to the
+                            // buffer matches the pointer to the first (and only) slot in it.
                             let slot_stamp = unsafe { &(*self.channel.buffer).stamp };
 
                             // If the stamp didn't change, the message was not received yet.
@@ -306,7 +302,7 @@ impl<T> Sink<T> for Sender<T> {
                                 // Listen for a handoff event.
                                 let listener = h.listen();
 
-                                // Check again.
+                                // Check the stamp again.
                                 if slot_stamp.load(Ordering::SeqCst) == stamp {
                                     // Now we're really blocked on handoff - store this listener
                                     // and go back to the outer loop.
@@ -315,7 +311,6 @@ impl<T> Sink<T> for Sender<T> {
                                 }
                             }
                         }
-
                         // Continue the inner loop to send the next message...
                     }
                     Err(TrySendError::Disconnected(_)) => {
@@ -330,7 +325,7 @@ impl<T> Sink<T> for Sender<T> {
                         // Listen for a receive event.
                         match self.listener.as_mut() {
                             None => {
-                                // Store a listener and try sending the message again.
+                                // Create a listener and try sending the message again.
                                 self.listener = Some(self.channel.sink_ops.listen());
                             }
                             Some(_) => {
@@ -357,28 +352,23 @@ impl<T> fmt::Debug for Sender<T> {
 
 /// The receiving side of a channel.
 ///
-/// This type receives messages by calling `recv`. But it also implements the [`Stream`] trait,
-/// which means it can act as an asynchronous iterator. This struct is created by the [`chan`]
-/// function. See its documentation for more.
+/// This struct is created by the [`chan`] function. See its documentation for more.
 ///
-/// [`chan`]: fn.chan.html
-/// [`Stream`]: ../stream/trait.Stream.html
+/// Receivers can be cloned and implement [`Stream`]. Note if a message is sent into a channel and
+/// there are multiple receivers, only one of them will receive the message.
 ///
 /// # Examples
 ///
 /// ```
-/// # async_std::task::block_on(async {
-/// #
+/// use smol::{Task, Timer};
 /// use std::time::Duration;
 ///
-/// use async_std::sync::channel;
-/// use async_std::task;
+/// # smol::run(async {
+/// let (s, r) = piper::chan(100);
 ///
-/// let (s, r) = channel(100);
-///
-/// task::spawn(async move {
+/// let t = Task::spawn((async move {
 ///     s.send(1).await;
-///     task::sleep(Duration::from_secs(1)).await;
+///     Timer::after(Duration::from_secs(1)).await;
 ///     s.send(2).await;
 /// });
 ///
@@ -391,11 +381,14 @@ pub struct Receiver<T> {
     /// The inner channel.
     channel: Arc<Channel<T>>,
 
-    /// The key for this receiver in the `channel.next_ops` set. TODO
+    /// Listens for a send or disconnect event that unblocks this stream.
     listener: Option<EventListener>,
 }
 
 impl<T> Unpin for Receiver<T> {}
+
+unsafe impl<T: Send> Send for Receiver<T> {}
+unsafe impl<T: Send> Sync for Receiver<T> {}
 
 impl<T> Receiver<T> {
     /// TODO
@@ -444,6 +437,8 @@ impl<T> Receiver<T> {
     /// assert_eq!(r.capacity(), 5);
     /// ```
     pub fn capacity(&self) -> usize {
+        // If this channel does handoff, the capacity is 0, even though the internal buffer's
+        // capacity is 1.
         if self.channel.handoff.is_some() {
             0
         } else {
@@ -452,6 +447,8 @@ impl<T> Receiver<T> {
     }
 
     /// Returns `true` if the channel is empty.
+    ///
+    /// If the channel's capacity is zero, it is always empty.
     ///
     /// # Examples
     ///
@@ -469,10 +466,16 @@ impl<T> Receiver<T> {
     /// # })
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.channel.is_empty()
+        if self.capacity() == 0 {
+            true
+        } else {
+            self.channel.is_empty()
+        }
     }
 
     /// Returns `true` if the channel is full.
+    ///
+    /// If the channel's capacity is zero, it is always full.
     ///
     /// # Examples
     ///
@@ -490,7 +493,11 @@ impl<T> Receiver<T> {
     /// # })
     /// ```
     pub fn is_full(&self) -> bool {
-        self.channel.is_full()
+        if self.capacity() == 0 {
+            true
+        } else {
+            self.channel.is_full()
+        }
     }
 
     /// Returns the number of messages in the channel.
@@ -571,7 +578,7 @@ impl<T> Stream for Receiver<T> {
                 // Listen for a send event.
                 match self.listener.as_mut() {
                     None => {
-                        // Store a listener and try sending the message again.
+                        // Create a listener and try sending the message again.
                         self.listener = Some(self.channel.next_ops.listen());
                     }
                     Some(_) => {
@@ -657,10 +664,10 @@ struct Channel<T> {
     _marker: PhantomData<T>,
 }
 
+impl<T> Unpin for Channel<T> {}
+
 unsafe impl<T: Send> Send for Channel<T> {}
 unsafe impl<T: Send> Sync for Channel<T> {}
-
-impl<T> Unpin for Channel<T> {}
 
 impl<T> Channel<T> {
     /// Creates a bounded channel of capacity `cap`.
@@ -773,7 +780,7 @@ impl<T> Channel<T> {
                     }
                 }
             } else if stamp.wrapping_add(self.one_lap) == tail + 1 {
-                atomic::fence(Ordering::SeqCst);
+                full_fence();
                 let head = self.head.load(Ordering::Relaxed);
 
                 // If the head lags one lap behind the tail as well...
@@ -819,17 +826,25 @@ impl<T> Channel<T> {
             }
         };
 
-        if let Some(h) = &self.handoff {
-            let slot_stamp = unsafe { &(*self.buffer).stamp };
+        let listener = match &self.handoff {
+            None => return,
+            Some(h) => {
+                let slot_stamp = unsafe { &(*self.buffer).stamp };
 
-            if slot_stamp.load(Ordering::SeqCst) == stamp {
+                if slot_stamp.load(Ordering::SeqCst) != stamp {
+                    return;
+                }
+
                 let listener = h.listen();
 
-                if slot_stamp.load(Ordering::SeqCst) == stamp {
-                    listener.await;
+                if slot_stamp.load(Ordering::SeqCst) != stamp {
+                    return;
                 }
+
+                listener
             }
-        }
+        };
+        listener.await;
     }
 
     /// Attempts to receive a message.
@@ -890,7 +905,7 @@ impl<T> Channel<T> {
                     }
                 }
             } else if stamp == head {
-                atomic::fence(Ordering::SeqCst);
+                full_fence();
                 let tail = self.tail.load(Ordering::Relaxed);
 
                 // If the tail equals the head, that means the channel is empty.
@@ -1044,4 +1059,27 @@ enum TryRecvError {
 
     /// The channel is empty and disconnected.
     Disconnected,
+}
+
+/// Equivalent to `atomic::fence(Ordering::SeqCst)`, but in some cases faster.
+#[inline]
+fn full_fence() {
+    if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+        // HACK(stjepang): On x86 architectures there are two different ways of executing
+        // a `SeqCst` fence.
+        //
+        // 1. `atomic::fence(SeqCst)`, which compiles into a `mfence` instruction.
+        // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg` instruction.
+        //
+        // Both instructions have the effect of a full barrier, but empirical benchmarks have shown
+        // that the second one makes notifiying listeners a bit faster.
+        //
+        // The ideal solution here would be to use inline assembly, but we're instead creating a
+        // temporary atomic variable and compare-and-exchanging its value. No sane compiler to
+        // x86 platforms is going to optimize this away.
+        let a = AtomicUsize::new(0);
+        a.compare_and_swap(0, 1, Ordering::SeqCst);
+    } else {
+        atomic::fence(Ordering::SeqCst);
+    }
 }
