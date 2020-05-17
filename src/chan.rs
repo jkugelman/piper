@@ -15,7 +15,7 @@ use std::task::{Context, Poll};
 use crossbeam_utils::Backoff;
 use futures_util::future;
 use futures_sink::Sink;
-use futures_core::Stream;
+use futures_util::stream::Stream;
 
 use crate::event::{Event, EventListener};
 
@@ -277,7 +277,7 @@ impl<T> Sink<T> for Sender<T> {
         loop {
             // If this sink is blocked on an event, first make sure it is unblocked.
             if let Some(listener) = self.listener.as_mut() {
-                futures_core::ready!(Pin::new(listener).poll(cx));
+                futures_util::ready!(Pin::new(listener).poll(cx));
                 self.listener = None;
             }
 
@@ -548,7 +548,7 @@ impl<T> Stream for Receiver<T> {
         loop {
             // If this stream is blocked on an event, first make sure it is unblocked.
             if let Some(listener) = self.listener.as_mut() {
-                futures_core::ready!(Pin::new(listener).poll(cx));
+                futures_util::ready!(Pin::new(listener).poll(cx));
                 self.listener = None;
             }
 
