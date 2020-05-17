@@ -5,7 +5,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::io::{self, AsyncRead, AsyncWrite};
+use futures_io::{self as io, AsyncRead, AsyncWrite};
 
 /// A reference-counted pointer that implements async I/O traits.
 ///

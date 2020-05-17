@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use crate::event::Event;
 
 use crossbeam_utils::Backoff;
-use futures::io::{self, AsyncRead, AsyncWrite};
+use futures_io::{self as io, AsyncRead, AsyncWrite};
 
 /// A mutex that implements async I/O traits.
 ///
