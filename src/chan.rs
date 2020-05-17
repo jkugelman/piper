@@ -817,8 +817,8 @@ impl<T> Channel<T> {
 
             match listener.take() {
                 None => listener = Some(self.send_ops.listen()),
-                Some(w) => {
-                    w.await;
+                Some(l) => {
+                    l.await;
                     if self.cap > 1 {
                         self.send_ops.notify_one();
                     }
@@ -941,8 +941,8 @@ impl<T> Channel<T> {
 
             match listener.take() {
                 None => listener = Some(self.recv_ops.listen()),
-                Some(w) => {
-                    w.await;
+                Some(l) => {
+                    l.await;
                     if self.cap > 1 {
                         self.recv_ops.notify_one();
                     }
@@ -1072,7 +1072,7 @@ fn full_fence() {
         // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg` instruction.
         //
         // Both instructions have the effect of a full barrier, but empirical benchmarks have shown
-        // that the second one makes notifiying listeners a bit faster.
+        // that the second one is sometimes a bit faster.
         //
         // The ideal solution here would be to use inline assembly, but we're instead creating a
         // temporary atomic variable and compare-and-exchanging its value. No sane compiler to
