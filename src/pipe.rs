@@ -7,8 +7,8 @@ use std::sync::atomic::{self, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use futures::io::{AsyncRead, AsyncWrite};
-use futures::task::AtomicWaker;
+use futures_io::{AsyncRead, AsyncWrite};
+use futures_util::task::AtomicWaker;
 
 /// Creates a bounded single-producer single-consumer pipe.
 ///

@@ -9,7 +9,10 @@ repository = "https://github.com/stjepang/piper"
 
 [dependencies]
 crossbeam-utils = "0.7.0"
-futures = { version = "0.3.4", default-features = false, features = ["std"] }
+futures-sink = { version = "0.3.5", default-features = false, features = ["std"] }
+futures-io = { version = "0.3.5", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.5", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 smol = { git = "https://github.com/stjepang/smol.git" }
+futures = { version = "0.3.4", default-features = false, features = ["std"] }
