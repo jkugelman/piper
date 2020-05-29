@@ -63,6 +63,7 @@ impl Inner {
 /// another another active listener.
 ///
 /// Listeners are registered and notified in the first-in first-out fashion, ensuring fairness.
+#[allow(missing_debug_implementations)]
 pub struct Event {
     /// A pointer to heap-allocated inner state.
     ///
@@ -198,6 +199,7 @@ impl Default for Event {
 ///
 /// If a notified listener is dropped without ever waiting for a notification, dropping will notify
 /// another another active listener.
+#[allow(missing_debug_implementations)]
 pub struct EventListener {
     /// A reference to [`Event`]'s inner state.
     inner: Arc<Inner>,
