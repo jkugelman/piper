@@ -107,6 +107,36 @@ impl<T> From<T> for Arc<T> {
     }
 }
 
+impl<T: Clone> From<&[T]> for Arc<[T]> {
+    fn from(v: &[T]) -> Arc<[T]> {
+        Arc(v.into())
+    }
+}
+
+impl From<&str> for Arc<str> {
+    fn from(v: &str) -> Arc<str> {
+        Arc(v.into())
+    }
+}
+
+impl From<String> for Arc<str> {
+    fn from(v: String) -> Arc<str> {
+        Arc(v.into())
+    }
+}
+
+impl<T: ?Sized> From<Box<T>> for Arc<T> {
+    fn from(v: Box<T>) -> Arc<T> {
+        Arc(v.into())
+    }
+}
+
+impl<T> From<Vec<T>> for Arc<[T]> {
+    fn from(v: Vec<T>) -> Arc<[T]> {
+        Arc(v.into())
+    }
+}
+
 // NOTE(stjepang): It would also make sense to have the following impls:
 //
 // - `impl<T> AsyncRead for &Arc<T> where &T: AsyncRead {}`
