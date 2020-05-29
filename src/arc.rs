@@ -34,9 +34,9 @@ use futures_io::{self as io, AsyncRead, AsyncWrite};
 /// io::copy(reader, &mut writer).await?;
 /// # Ok(()) }) }
 /// ```
-pub struct Arc<T>(std::sync::Arc<T>);
+pub struct Arc<T: ?Sized>(std::sync::Arc<T>);
 
-impl<T> Unpin for Arc<T> {}
+impl<T: ?Sized> Unpin for Arc<T> {}
 
 impl<T> Arc<T> {
     /// Constructs a new `Arc<T>`.
@@ -56,13 +56,13 @@ impl<T> Arc<T> {
     }
 }
 
-impl<T> Clone for Arc<T> {
+impl<T: ?Sized> Clone for Arc<T> {
     fn clone(&self) -> Arc<T> {
         Arc(self.0.clone())
     }
 }
 
-impl<T> Deref for Arc<T> {
+impl<T: ?Sized> Deref for Arc<T> {
     type Target = T;
 
     #[inline]
@@ -71,25 +71,25 @@ impl<T> Deref for Arc<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Arc<T> {
+impl<T: ?Sized + fmt::Debug> fmt::Debug for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: fmt::Display> fmt::Display for Arc<T> {
+impl<T: ?Sized + fmt::Display> fmt::Display for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
 }
 
-impl<T: Hash> Hash for Arc<T> {
+impl<T: ?Sized + Hash> Hash for Arc<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         (**self).hash(state)
     }
 }
 
-impl<T> fmt::Pointer for Arc<T> {
+impl<T: ?Sized> fmt::Pointer for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&(&**self as *const T), f)
     }
@@ -118,7 +118,7 @@ impl<T> From<T> for Arc<T> {
 //
 // Since those impls are not essential, I decided to err on the safe side and not include them.
 
-impl<T> AsyncRead for Arc<T>
+impl<T: ?Sized> AsyncRead for Arc<T>
 where
     for<'a> &'a T: AsyncRead,
 {
@@ -139,7 +139,7 @@ where
     }
 }
 
-impl<T> AsyncWrite for Arc<T>
+impl<T: ?Sized> AsyncWrite for Arc<T>
 where
     for<'a> &'a T: AsyncWrite,
 {
